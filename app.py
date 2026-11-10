@@ -6,9 +6,9 @@ import json, os, random, time
 app = FastAPI()
 
 # ==================== ⚙️ إعدادات ====================
-ADMIN_PASSWORD = "admin123"  # غير كلمة سر لوحة التحكم
-STOCK_FILE = "accounts_stock.json"  # الملف الذي سيتم حفظ الحسابات فيه
-IP_FILE = "ips_record.json" # لحفظ من أخذ حساباً لمنع التكرار
+ADMIN_PASSWORD = "admin123"  # غير كلمة سر لوحة التحكم من هنا
+STOCK_FILE = "accounts_stock.json"  
+IP_FILE = "ips_record.json" 
 
 # دوال التعامل مع الملفات
 def load_json(file):
@@ -16,12 +16,12 @@ def load_json(file):
         try:
             with open(file, "r") as f: return json.load(f)
         except: pass
-    return {}
+    return []
 
 def save_json(file, data):
     with open(file, "w") as f: json.dump(data, f)
 
-# ==================== 🎨 الواجهة الأمامية (تصميم غامض ومتحرك) ====================
+# ==================== 🎨 الواجهة الأمامية (تصميم غامض) ====================
 HTML_MAIN = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -32,7 +32,7 @@ HTML_MAIN = """
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&display=swap" rel="stylesheet">
     <style>
         :root { 
-            --primary: #8a2be2; /* بنفسجي غامض */
+            --primary: #8a2be2; 
             --glow: rgba(138, 43, 226, 0.4); 
             --bg: #020204;
         }
@@ -43,7 +43,7 @@ HTML_MAIN = """
             display: flex; justify-content: center; align-items: center; overflow: hidden; position: relative;
         }
 
-        /* تأثير الخلفية الغامضة المتحركة (جزيئات ونجوم) */
+        /* تأثير الخلفية الغامضة المتحركة */
         .stars { position: absolute; width: 100%; height: 100%; z-index: 0; overflow: hidden; }
         .star {
             position: absolute; background: white; border-radius: 50%;
@@ -171,9 +171,8 @@ HTML_MAIN = """
                     document.getElementById('res-email').innerText = data.email;
                     document.getElementById('res-pass').innerText = data.password;
                 } else {
-                    // في حال نفاذ المخزون
                     document.getElementById('main-btn').classList.remove('hidden');
-                    document.getElementById('main-btn').innerText = "نفذت الكمية! ❌";
+                    document.getElementById('main-btn').innerText = data.error;
                     document.getElementById('main-btn').style.background = "#333";
                     document.getElementById('main-btn').style.boxShadow = "none";
                 }
@@ -193,8 +192,8 @@ HTML_MAIN = """
 </html>
 """
 
-# ==================== 👑 لوحة الأدمن لرفع المخزون ====================
-ADMIN_HTML = """
+# ==================== 👑 لوحة الأدمن ====================
+ADMIN_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -215,17 +214,15 @@ ADMIN_HTML = """
     <div class="box">
         <h1>مخزون الحسابات</h1>
         <form action="/admin/upload" method="post" enctype="multipart/form-data">
+            <!-- إرسال كلمة السر تلقائياً مع الملف -->
+            <input type="hidden" name="passkey" value="__PASSKEY__">
+            
             <label>ارفع ملف نصي (txt) يحتوي على الحسابات (email:password) كل حساب في سطر:</label>
             <input type="file" name="file" accept=".txt" required>
             <button type="submit">تعبئة المخزون 🚀</button>
         </form>
-        <div class="stats" id="stats">جاري حساب العدد...</div>
+        <div class="stats" id="stats">الحسابات المتوفرة: __COUNT__</div>
     </div>
-    <script>
-        fetch('/api/stock_count').then(r => r.json()).then(d => {
-            document.getElementById('stats').innerText = "الحسابات المتوفرة حالياً: " + d.count;
-        });
-    </script>
 </body>
 </html>
 """
@@ -237,21 +234,21 @@ async def home():
 
 @app.post("/api/get_account")
 async def get_account(request: Request):
-    # التحقق من الـ IP (اختياري: يمكنك إزالة هذا الجزء إذا كنت تريد السماح للشخص بسحب أكثر من حساب)
     client_ip = request.client.host
     ips = load_json(IP_FILE)
+    if not isinstance(ips, dict): ips = {}
+    
     now = time.time()
 
-    # حماية: حساب واحد كل 12 ساعة لكل شخص (لمنع سحب كل المخزون في دقيقة)
+    # حماية: حساب واحد كل 12 ساعة لكل IP
     if client_ip in ips:
         time_passed = now - ips[client_ip]
         if time_passed < 43200: # 12 ساعة
-            return {"success": False, "error": "لقد أخذت حساباً بالفعل اليوم. حاول غداً."}
+            return {"success": False, "error": "لقد أخذت حساباً مؤخراً. حاول لاحقاً."}
 
-    # سحب حساب من المخزون
     stock = load_json(STOCK_FILE)
-    if not stock:
-        return {"success": False, "error": "نفذت الكمية"}
+    if not isinstance(stock, list) or not stock:
+        return {"success": False, "error": "نفذت الكمية! ❌"}
 
     # اختيار حساب عشوائي وحذفه من المخزون
     acc = random.choice(stock)
@@ -264,35 +261,47 @@ async def get_account(request: Request):
 
     return {"success": True, "email": acc["email"], "password": acc["password"]}
 
-@app.get("/api/stock_count")
-async def stock_count():
-    stock = load_json(STOCK_FILE)
-    return {"count": len(stock)}
-
 # ==================== 👑 مسارات الأدمن ====================
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(passkey: str = ""):
-    if passkey != ADMIN_PASSWORD: return HTMLResponse("<h1 style='color:red;text-align:center;margin-top:50px;'>🚫 ممنوع</h1>", status_code=403)
-    return ADMIN_HTML
+    if passkey != ADMIN_PASSWORD: 
+        return HTMLResponse("<h1 style='color:red;text-align:center;margin-top:50px;font-family:sans-serif;'>🚫 ممنوع الدخول</h1>", status_code=403)
+    
+    stock = load_json(STOCK_FILE)
+    count = len(stock) if isinstance(stock, list) else 0
+    
+    final_html = ADMIN_HTML_TEMPLATE.replace("__PASSKEY__", passkey).replace("__COUNT__", str(count))
+    return HTMLResponse(content=final_html)
 
 @app.post("/admin/upload")
-async def admin_upload(passkey: str = "", file: UploadFile = File(...)):
-    if passkey != ADMIN_PASSWORD: raise HTTPException(status_code=403)
+async def admin_upload(passkey: str = Form(...), file: UploadFile = File(...)):
+    if passkey != ADMIN_PASSWORD: 
+        raise HTTPException(status_code=403, detail="كلمة السر خاطئة")
     
     content = await file.read()
     lines = content.decode("utf-8", errors="ignore").splitlines()
     
     stock = load_json(STOCK_FILE)
+    if not isinstance(stock, list): stock = []
+        
     added_count = 0
-    
     for line in lines:
+        line = line.strip()
         if ":" in line:
             email, password = line.split(":", 1)
-            stock.append({"email": email.strip(), "password": password.strip()})
-            added_count += 1
+            if email and password:
+                stock.append({"email": email.strip(), "password": password.strip()})
+                added_count += 1
             
     save_json(STOCK_FILE, stock)
-    return HTMLResponse(f"<h1 style='color:#00ff00;text-align:center;margin-top:50px;font-family:sans-serif;'>✅ تم إضافة {added_count} حساب للمخزون بنجاح.</h1>")
+    
+    return HTMLResponse(f"""
+    <div style='text-align:center; font-family:sans-serif; margin-top:50px; color:#fff; background:#020204; height:100vh; padding-top:100px;'>
+        <h1 style='color:#00ff00;'>✅ تم إضافة {added_count} حساب للمخزون بنجاح.</h1>
+        <a href='/admin?passkey={passkey}' style='color:#8a2be2; font-size:20px; text-decoration:none; border:1px solid #8a2be2; padding:10px 20px; border-radius:10px; display:inline-block; margin-top:20px;'>العودة للوحة التحكم</a>
+    </div>
+    """)
 
+# ==================== 🚀 التشغيل (متوافق مع Render) ====================
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=10000)
